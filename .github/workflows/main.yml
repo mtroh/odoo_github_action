@@ -1,0 +1,45 @@
+name: Deploy Odoo Module
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        
+    - name: Deploy module to Odoo server
+      run: |
+        # Création d'un tar.gz du module
+        tar -czf module.tar.gz --exclude='.git' --exclude='.github' ./mail_debrand_pipeline
+        
+        # Copie du module sur le serveur Odoo
+        scp -o StrictHostKeyChecking=no module.tar.gz ubuntu@57.128.108.79:/tmp/
+        
+        # Installation du module via SSH
+        ssh -o StrictHostKeyChecking=no ubuntu@57.128.108.79 << 'EOF'
+          # Extraire le module dans le dossier des addons Odoo
+          sudo tar -xzf /tmp/module.tar.gz -C /var/lib/odoo/addons/16.0/ --overwrite
+          
+          # Mettre à jour les permissions
+          sudo chown -R odoo:odoo /var/lib/odoo/addons/16.0/mail_debrand_pipeline
+          
+          # Redémarrer Odoo pour prendre en compte les modifications
+          sudo systemctl restart odoo
+          
+          # Mise à jour de la liste des modules (optionnel - nécessite un accès à l'API Odoo)
+          # curl -X POST -F 'jsonrpc=2.0' -F 'method=call' -F 'params={"db":"votre_base_de_donnees","login":"admin","password":"votre_mot_de_passe","module":"mail_debrand_pipeline"}' http://localhost:8069/web/dataset/call_kw/ir.module.module/button_immediate_upgrade
+          
+          # Nettoyage
+          rm /tmp/module.tar.gz
+        EOF
