@@ -41,20 +41,21 @@ pipeline {
         }
         
         stage('Update Module List') {
-            steps {
-                script {
-                    // Corrigé : Utiliser 1 comme ID utilisateur (l'administrateur a généralement l'ID 1)
-                    sh """
-                    curl -X POST \\
-                        -H 'Content-Type: application/json' \\
-                        -d '{"jsonrpc": "2.0", "method": "call", "params": {"service": "object", "method": "execute", "args": ["${DB_NAME}", 1, "admin", "ir.module.module", "update_list"]}}' \\
-                        http://localhost:${ODOO_PORT}/jsonrpc
-                    
-                    sudo systemctl restart odoo
-                    """
-                }
-            }
+    steps {
+        script {
+            sh """
+            # Mettre à jour la liste des modules avec le mot de passe administrateur
+            curl -s -X POST \\
+                -H 'Content-Type: application/json' \\
+                -d '{"jsonrpc": "2.0", "method": "call", "params": {"master_password": "va8r-kxnp-t538", "database": "odoo", "action": "modules"}}' \\
+                http://localhost:8069/web/database/manager
+            
+            # Redémarrer le service Odoo
+            sudo systemctl restart odoo
+            """
         }
+    }
+}
     }
     
     post {
