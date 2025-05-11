@@ -39,9 +39,26 @@ pipeline {
             steps {
                 script {
                     sh """
-                    # Mettre à jour la liste des modules
+                    # Arrêter le service Odoo
                     sudo systemctl stop odoo
-                    sudo -u odoo /usr/bin/odoo --config=/etc/odoo/odoo.conf --database=${DB_NAME} --update-module-list --stop-after-init
+                    
+                    # Utiliser la commande SQL directe pour mettre à jour la liste des modules
+                    sudo -u odoo psql ${DB_NAME} -c "SELECT ir_module_module_update_list()"
+                    
+                    # Alternative: utiliser une petite commande Python via l'API Odoo
+                    if [ \$? -ne 0 ]; then
+                        echo "La fonction SQL n'existe pas, utilisation de Python..."
+                        sudo -u odoo python3 -c "
+import odoo
+from odoo.modules import db
+registry = odoo.registry('${DB_NAME}')
+with registry.cursor() as cr:
+    db.update_module_list(cr)
+print('Module list updated')
+"
+                    fi
+                    
+                    # Démarrer le service Odoo
                     sudo systemctl start odoo
                     
                     # Attendre que le service démarre
