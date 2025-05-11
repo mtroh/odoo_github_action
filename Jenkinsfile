@@ -39,34 +39,48 @@ pipeline {
             steps {
                 script {
                     sh """
-                    # Arrêter le service Odoo
-                    sudo systemctl stop odoo
+                    # Simplement redémarrer le service Odoo
+                    # Odoo scanne les dossiers d'addons au démarrage et met à jour la liste des modules
+                    sudo systemctl restart odoo
                     
-                    # Utiliser la commande SQL directe pour mettre à jour la liste des modules
-                    sudo -u odoo psql ${DB_NAME} -c "SELECT ir_module_module_update_list()"
+                    # Attendre que le service démarre complètement
+                    echo "Attente du démarrage d'Odoo..."
+                    sleep 10
                     
-                    # Alternative: utiliser une petite commande Python via l'API Odoo
-                    if [ \$? -ne 0 ]; then
-                        echo "La fonction SQL n'existe pas, utilisation de Python..."
-                        sudo -u odoo python3 -c "
-import odoo
-from odoo.modules import db
-registry = odoo.registry('${DB_NAME}')
-with registry.cursor() as cr:
-    db.update_module_list(cr)
-print('Module list updated')
-"
+                    # Vérifier si le module est dans la base de données
+                    echo "Vérification de la présence du module dans la base de données..."
+                    RESULT=\$(sudo -u odoo psql ${DB_NAME} -t -c "SELECT COUNT(*) FROM ir_module_module WHERE name='${MODULE_NAME}';")
+                    
+                    if [ "\$(echo \$RESULT | tr -d ' ')" -gt "0" ]; then
+                        echo "Le module ${MODULE_NAME} a été trouvé dans la base de données!"
+                    else
+                        echo "Le module ${MODULE_NAME} n'a pas été trouvé dans la base de données."
+                        # On va installer manuellement le module en utilisant l'API Python d'Odoo
+                        echo "Tentative de mise à jour manuelle de la liste des modules..."
+                        
+                        sudo -u odoo python3 - <<EOF
+import sys, os
+try:
+    import odoo
+    from odoo.modules import module
+    odoo.tools.config.parse_config(['-c', '/etc/odoo/odoo.conf', '-d', '${DB_NAME}'])
+    with odoo.api.Environment.manage():
+        registry = odoo.modules.registry.Registry('${DB_NAME}')
+        with registry.cursor() as cr:
+            env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
+            module_obj = env['ir.module.module']
+            print("Mise à jour de la liste des modules...")
+            module_obj.update_list()
+            print("Liste des modules mise à jour.")
+except Exception as e:
+    print(f"Erreur lors de la mise à jour: {e}")
+    sys.exit(1)
+EOF
+                        
+                        # Vérifier à nouveau
+                        echo "Vérification après mise à jour manuelle..."
+                        sudo -u odoo psql ${DB_NAME} -c "SELECT name, state FROM ir_module_module WHERE name='${MODULE_NAME}';"
                     fi
-                    
-                    # Démarrer le service Odoo
-                    sudo systemctl start odoo
-                    
-                    # Attendre que le service démarre
-                    sleep 5
-                    
-                    # Vérifier que le module est reconnu
-                    echo "Vérification que le module est dans la base de données..."
-                    sudo -u odoo psql ${DB_NAME} -c "SELECT name, state FROM ir_module_module WHERE name='${MODULE_NAME}';"
                     """
                 }
             }
@@ -78,7 +92,7 @@ print('Module list updated')
             echo 'Module déployé avec succès dans Odoo !'
         }
         failure {
-            echo 'Échec du déploiement du module'
+            echo 'Échec du déploiement du module. Vérifiez les logs pour plus de détails.'
         }
     }
 }
